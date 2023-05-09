@@ -1,0 +1,10 @@
+# protos
+protoc --c_out=. chat.proto
+
+# server
+gcc server.c chat.pb-c.c -o server -lprotobuf-c
+./server
+
+# client
+gcc client.c chat.pb-c.c -o client -lprotobuf-c
+./client

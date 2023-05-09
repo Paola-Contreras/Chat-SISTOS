@@ -1,3 +1,4 @@
+#include <pthread.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <stdio.h>
@@ -5,44 +6,45 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#include "chat.pb-c.h"
 #include <stdbool.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <unistd.h>
+#include "chat.pb-c.h"
 
-#define BUFFER_SIZE 1024
+char username[1024];
 
-char* get_local_ip_address() {
-    char hostname[1024];
-    gethostname(hostname, sizeof(hostname));
+// void* client_msj_recv(void* arg) {
+//     int client_sock = *((int*)arg);
 
-    struct hostent *host = gethostbyname(hostname);
-    if (host == NULL) {
-        printf("Error al obtener la dirección IP local.\n");
-        return NULL;
-    }
+//     ChatSistOS__Answer* answ = NULL;
+//     while (1) {
+//         uint8_t buffer[4096];
+//         ssize_t bytes_recv = recv(client_sock, buffer, sizeof(buffer), 0);
+//         if (bytes_recv < 0) {
+//             perror("recv");
+//             break;
+//         } else if (bytes_recv == 0) {
+//             printf("Server disconnected\n");
+//             break;
+//         }
 
-    struct in_addr **addr_list = (struct in_addr **)host->h_addr_list;
-    char *ip_address = malloc(INET_ADDRSTRLEN * sizeof(char));
-    if (ip_address == NULL) {
-        printf("Error al reservar memoria para la dirección IP.\n");
-        return NULL;
-    }
+//         answ = chat_sist_os__answer__unpack(NULL, bytes_recv, buffer);
+//         if (answ == NULL) {
+//             printf("Error unpacking message\n");
+//             break;
+//         }
 
-    for (int i = 0; addr_list[i] != NULL; i++) {
-        inet_ntop(AF_INET, addr_list[i], ip_address, INET_ADDRSTRLEN);
-        return ip_address;
-    }
+//         // Verificar si el mensaje es para este usuario
+//         if (strcmp(answ->message->message_destination, username) == 0) {
+//             printf("%s: %s\n", answ->message->message_sender, answ->message->message_content);
+//         }
 
-    free(ip_address);
-    return NULL;
-}
+//         // Liberar memoria
+//         chat_sist_os__answer__free_unpacked(answ, NULL);
+//     }
+
+//     close(client_sock);
+//     return NULL;
+// }
+
 
 
 void help(){
@@ -75,103 +77,122 @@ int menu() {
 }
 
 
-int main(int argc, char **argv) {
+int main() {
 
     int client_sock;
     struct sockaddr_in server_addr;
-    uint8_t recv_buffer_confirmationNewUser[BUFFER_SIZE];
-    char mensaje[1024];
+    char buffer[1024];
+    char mensaje[256];
+    char userDest[256];
     int bytes_received;
     int opc = -1; // Inicializar con un valor inválido
     int userCreated;
 
-    // Administrar parámetros de compilación
-    char *username = argv[1];
-    char *ip = argv[2];
-    char *puerto = argv[3];
-
-    // Crear socket
     client_sock = socket(PF_INET, SOCK_STREAM, 0);
 
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
-    server_addr.sin_addr.s_addr = inet_addr(ip);
-    server_addr.sin_port = htons(atoi(puerto));
+    server_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    server_addr.sin_port = htons(12345);
 
-    // Conectar con servidor
     connect(client_sock, (struct sockaddr *)&server_addr, sizeof(server_addr));
+
     printf("Conectado al servidor\n");
-    printf("BIENVENIDO AL CHAT %s.\n", username);
+    printf("BIENVENIDO AL CHAT.\n");
 
-    // Hacer un useroption para crear el usuario
-    
-
-    // Crear nuevo usuario y enviarlo
-    ChatSistOS__NewUser user = CHAT_SIST_OS__NEW_USER__INIT;
-    // Agregar parámetros de Usuario
-    user.username = username;
-    user.ip = get_local_ip_address();
-    
-    // Serializar
-    size_t userSize = chat_sist_os__new_user__get_packed_size(&user);
-    uint8_t *buffer = malloc(userSize);
-    chat_sist_os__new_user__pack(&user, buffer);
-    send(client_sock, buffer, userSize, 0);
-
+    printf("Ingrese el nombre de usuario: ");
+    fgets(username, sizeof(username), stdin);
+    send(client_sock, username, strlen(username), 0);
 
     // Recibir confirmación de creación de usuario.
-    bytes_received = recv(client_sock, recv_buffer_confirmationNewUser, sizeof(recv_buffer_confirmationNewUser), 0);
-    ChatSistOS__Answer *answ = chat_sist_os__answer__unpack(NULL, bytes_received, recv_buffer_confirmationNewUser);
+    bytes_received = recv(client_sock, &userCreated, sizeof(userCreated), 0);
     if (bytes_received > 0) {
         bytes_received = 0;
+
         // Usuario creado
-        if (answ->response_status_code == 200) {
-            printf("%s\n", answ->response_message);
+        if (userCreated == 1) {
+            printf("Usuario creado.\n");
+
+            // // Crear thread que revice si recibe mensajes.
+            // pthread_t thread;
+            // if (pthread_create(&thread, NULL, client_msj_recv, (void *)&client_sock) < 0) {
+            //     perror("@! El thread encargado de recibir mensajes no pudo ser creado.");
+            //     exit(1);
+            // }
 
             // Menú de chat.
             while (opc != 7) {
                 opc = menu();
                 if (opc != -1) {
+                    // Enviar opción seleccionada
+                    if (opc == 1) {
+                        send(client_sock, &opc, sizeof(opc), 0);
+                        
+                        // Instanciar Message
+                        ChatSistOS__Message msj = CHAT_SIST_OS__MESSAGE__INIT;
+                        
+                        // Pedir mensaje
+                        printf("Ingrese el mensaje que desea enviar a todos los usuarios: \n");
+                        getchar(); 
+                        scanf("%199[^\n]%*c", mensaje);
 
-                    // Instanciar option
-                    ChatSistOS__UserOption opcUser = CHAT_SIST_OS__USER_OPTION__INIT;
-                    ChatSistOS__Status status = CHAT_SIST_OS__STATUS__INIT;
-                    ChatSistOS__Message msj = CHAT_SIST_OS__MESSAGE__INIT;
+                        // Agregar parámetros de Message
+                        msj.message_private = false;
+                        msj.message_content = strdup(mensaje);
+                        msj.message_sender = strdup(username);
+                        
+                        // Serializar mensaje
+                        size_t sizeMsj = chat_sist_os__message__get_packed_size(&msj);
+                        uint8_t *buffer_msj = malloc(sizeMsj);
+                        chat_sist_os__message__pack(&msj, buffer_msj);
 
-                    switch (opc) {
-                        case 1:
-                            status.user_name = username;
-                            status.user_state = 1;
+                        printf("Buffer contents: %s\n", buffer_msj);
 
-                            // Pedir mensaje
-                            printf("Ingrese el mensaje que desea enviar a todos los usuarios: \n");
-                            fgets(mensaje, sizeof(mensaje), stdin);
+                        // Enviar
+                        send(client_sock, buffer_msj, sizeMsj, 0);
 
-                            // Agregar parámetros de Message
-                            msj.message_private = false;
-                            strcpy(msj.message_content, mensaje);
-                            strcpy(msj.message_sender, username);
+                    } else if ( opc == 2 ) {
+                        send(client_sock, &opc, sizeof(opc), 0);
+                        // Instanciar Message
+                        ChatSistOS__Message msj = CHAT_SIST_OS__MESSAGE__INIT;
+                        
+                        // Pedir usuario destino
+                        printf(">> Ingrese el usuario destino: \n");
+                        getchar(); 
+                        scanf("%[^\n]%*c", userDest);
 
-                            // Agregar parámetros de la opción del usuario
-                            opcUser.op = opc;
-                            opcUser.createuser = &user;
-                            opcUser.status = &status; // Activo
-                            opcUser.message = &msj;
+                        // Pedir mensaje
+                        printf(">> Ingrese el mensaje que desea enviar: \n");
+                        getchar(); 
+                        scanf("%[^\n]%*c", mensaje);
 
-                            // Serializar 
-                            size_t sizeOpc = chat_sist_os__user_option__get_packed_size(&opcUser);
-                            uint8_t *buffer_opc = malloc(sizeOpc);
-                            chat_sist_os__user_option__pack(&opcUser, buffer_opc);
+                        // Agregar parámetros de Message
+                        msj.message_private = false;
+                        strcpy(msj.message_destination, userDest);
+                        strcpy(msj.message_content, mensaje);
+                        strcpy(msj.message_sender, username);
+                        
+                        // Serializar mensaje
+                        size_t sizeMsj = chat_sist_os__message__get_packed_size(&msj);
+                        uint8_t *buffer_msj = malloc(sizeMsj);
+                        chat_sist_os__message__pack(&msj, buffer_msj);
 
-                            // Enviar a servidor
-                            send(client_sock, buffer_opc, sizeOpc, 0);
-                    }
-                    
+                        // Enviar
+                        // send(client_sock, buffer_msj, sizeMsj, 0);
+                    } else if (opc == 3 || opc == 4 || opc == 5) {
+                        send(client_sock, &opc, sizeof(opc), 0);
+                        // Imprimir resultado de opción seleccionada.
+                        bytes_received = recv(client_sock, buffer, sizeof(buffer), 0);
+                        if (bytes_received > 0) {
+                            buffer[bytes_received] = '\0';
+                            printf("%s", buffer);
+                        }
+                    } 
                 }
             }
         } else {
             // El usuario ya existía.
-            printf("%s\n", answ->response_message);
+            printf("No se pudo crear el usuario. Ya existe un usuario con el mismo nombre de usuario y/o dirección IP.\n");
         }
     }
 
